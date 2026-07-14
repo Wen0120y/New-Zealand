@@ -1,12 +1,14 @@
 ﻿from __future__ import annotations
 
 import re
+import json
 from html import escape
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 try:
     from docx import Document
@@ -95,7 +97,7 @@ st.markdown(
     }
     .mentor-card-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
         gap: 14px;
         margin-top: 12px;
     }
@@ -123,6 +125,11 @@ st.markdown(
         transform: translateY(-1px);
         box-shadow: 0 8px 18px rgba(16, 24, 40, 0.10);
     }
+    .mentor-card.selected {
+        border-color: #d92d20;
+        box-shadow: inset 0 0 0 1px #d92d20;
+        background: #fff7f6;
+    }
     .mentor-logo-wrap {
         width: 58px;
         height: 58px;
@@ -130,22 +137,80 @@ st.markdown(
         display: grid;
         place-items: center;
         background: #f3f4f6;
+        color: #475467;
+        font-size: 0.8rem;
+        font-weight: 700;
         overflow: hidden;
+    }
+    .mentor-logo-wrap::after {
+        content: attr(data-fallback);
     }
     .mentor-logo {
         width: 44px;
         height: 44px;
         object-fit: contain;
+        display: block;
+    }
+    .mentor-logo-wrap:has(.mentor-logo)::after {
+        content: "";
     }
     .mentor-name {
-        font-size: 0.94rem;
+        font-size: 0.9rem;
         font-weight: 700;
-        line-height: 1.2;
+        line-height: 1.18;
     }
     .mentor-school {
         font-size: 0.72rem;
         line-height: 1.15;
         color: #667085;
+    }
+    .mentor-detail-panel {
+        position: sticky;
+        top: 16px;
+        border: 1px solid rgba(49, 51, 63, 0.16);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 16px;
+        margin-top: 12px;
+    }
+    .mentor-detail-panel h3 {
+        margin: 0 0 4px;
+        font-size: 1.2rem;
+        line-height: 1.25;
+    }
+    .mentor-detail-school {
+        color: #667085;
+        font-size: 0.86rem;
+        margin-bottom: 12px;
+    }
+    .mentor-detail-row {
+        margin-top: 10px;
+        font-size: 0.88rem;
+        line-height: 1.35;
+    }
+    .mentor-detail-row strong {
+        display: block;
+        color: #344054;
+        margin-bottom: 2px;
+    }
+    .mentor-detail-row span {
+        color: #475467;
+    }
+    .mentor-home-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        margin-top: 14px;
+        padding: 0 16px;
+        border-radius: 8px;
+        background: #d92d20;
+        color: #ffffff !important;
+        text-decoration: none !important;
+        font-weight: 700;
+    }
+    .mentor-home-button:hover {
+        background: #b42318;
     }
     </style>
     """,
@@ -267,24 +332,232 @@ def school_initials(school: str) -> str:
     return "".join(word[0].upper() for word in words[:2]) or "NZ"
 
 
-def mentor_card_html(name: str, school: str, url: str) -> str:
-    safe_name = escape(name)
-    safe_school = escape(school)
-    safe_url = escape(url, quote=True)
-    logo_url = school_logo_url(school)
-    logo_html = (
-        f'<img class="mentor-logo" src="{escape(logo_url, quote=True)}" alt="{safe_school} logo" '
-        f'onerror="this.replaceWith(document.createTextNode(\'{escape(school_initials(school))}\'));">'
-        if logo_url
-        else escape(school_initials(school))
-    )
-    return (
-        f'<a class="mentor-card" href="{safe_url}" target="_blank" rel="noopener noreferrer">'
-        f'<div class="mentor-logo-wrap">{logo_html}</div>'
-        f'<div class="mentor-name">{safe_name}</div>'
-        f'<div class="mentor-school">{safe_school}</div>'
-        "</a>"
-    )
+def school_css_class(school: str) -> str:
+    school = school.strip()
+    mapping = {
+        "University of Waikato": "school-waikato",
+        "University of Otago": "school-otago",
+        "University of Canterbury": "school-canterbury",
+        "University of Auckland": "school-auckland",
+        "Massey University": "school-massey",
+        "Victoria University of Wellington": "school-wellington",
+    }
+    return mapping.get(school, "school-generic")
+
+
+def find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    lowered = {str(col).lower(): col for col in df.columns}
+    for candidate in candidates:
+        candidate_lower = candidate.lower()
+        for lower_name, original in lowered.items():
+            if candidate_lower in lower_name:
+                return original
+    return None
+
+
+def value_text(row: pd.Series, col: str | None) -> str:
+    if not col:
+        return ""
+    value = row.get(col, "")
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def mentor_explorer_html(mentors: list[dict[str, Any]]) -> str:
+    payload = json.dumps(mentors, ensure_ascii=False)
+    return f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body {{
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #31333f;
+}}
+.mentor-layout {{
+    display: grid;
+    grid-template-columns: minmax(0, 0.62fr) minmax(280px, 0.38fr);
+    gap: 24px;
+    align-items: start;
+}}
+.mentor-card-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 14px;
+}}
+.mentor-card {{
+    aspect-ratio: 1 / 1;
+    border: 1px solid rgba(49, 51, 63, 0.16);
+    border-radius: 8px;
+    background: #fff;
+    color: #31333f;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    padding: 12px;
+    text-align: center;
+    text-decoration: none;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+    cursor: pointer;
+}}
+.mentor-card:hover {{
+    border-color: #d92d20;
+    color: #b42318;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(16, 24, 40, 0.10);
+}}
+.mentor-card.selected {{
+    border-color: #d92d20;
+    box-shadow: inset 0 0 0 1px #d92d20;
+    background: #fff7f6;
+}}
+.mentor-logo-wrap {{
+    width: 58px;
+    height: 58px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: #f3f4f6;
+    color: #475467;
+    font-size: 0.8rem;
+    font-weight: 700;
+    overflow: hidden;
+}}
+.mentor-logo {{
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+    display: block;
+}}
+.mentor-name {{
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.18;
+}}
+.mentor-school {{
+    font-size: 0.72rem;
+    line-height: 1.15;
+    color: #667085;
+}}
+.mentor-detail-panel {{
+    position: sticky;
+    top: 0;
+    border: 1px solid rgba(49, 51, 63, 0.16);
+    border-radius: 8px;
+    background: #fff;
+    padding: 16px;
+}}
+.mentor-detail-panel h3 {{
+    margin: 0 0 4px;
+    font-size: 1.2rem;
+    line-height: 1.25;
+}}
+.mentor-detail-school {{
+    color: #667085;
+    font-size: 0.86rem;
+    margin-bottom: 12px;
+}}
+.mentor-detail-row {{
+    margin-top: 10px;
+    font-size: 0.88rem;
+    line-height: 1.35;
+}}
+.mentor-detail-row strong {{
+    display: block;
+    color: #344054;
+    margin-bottom: 2px;
+}}
+.mentor-detail-row span {{
+    color: #475467;
+}}
+.mentor-home-button {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    margin-top: 14px;
+    padding: 0 16px;
+    border-radius: 8px;
+    background: #d92d20;
+    color: #fff;
+    text-decoration: none;
+    font-weight: 700;
+}}
+.mentor-home-button:hover {{
+    background: #b42318;
+}}
+@media (max-width: 760px) {{
+    .mentor-layout {{
+        grid-template-columns: 1fr;
+    }}
+    .mentor-detail-panel {{
+        position: static;
+    }}
+}}
+</style>
+</head>
+<body>
+<div class="mentor-layout">
+    <div id="cards" class="mentor-card-grid"></div>
+    <aside id="detail" class="mentor-detail-panel"></aside>
+</div>
+<script>
+const mentors = {payload};
+const cards = document.getElementById("cards");
+const detail = document.getElementById("detail");
+let selectedIndex = 0;
+
+function escapeHtml(value) {{
+    return String(value ?? "").replace(/[&<>"']/g, ch => ({{
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }}[ch]));
+}}
+
+function renderCards() {{
+    cards.innerHTML = mentors.map((mentor, index) => `
+        <button class="mentor-card ${{index === selectedIndex ? "selected" : ""}}" type="button" data-index="${{index}}">
+            <span class="mentor-logo-wrap">
+                ${{mentor.logo ? `<img class="mentor-logo" src="${{escapeHtml(mentor.logo)}}" alt="${{escapeHtml(mentor.school)}} logo" onerror="this.replaceWith(document.createTextNode('${{escapeHtml(mentor.initials)}}'));">` : escapeHtml(mentor.initials)}}
+            </span>
+            <span class="mentor-name">${{escapeHtml(mentor.name)}}</span>
+            <span class="mentor-school">${{escapeHtml(mentor.school)}}</span>
+        </button>
+    `).join("");
+}}
+
+function renderDetail() {{
+    const mentor = mentors[selectedIndex];
+    const rows = mentor.facts
+        .filter(item => item.value)
+        .map(item => `<div class="mentor-detail-row"><strong>${{escapeHtml(item.label)}}</strong><span>${{escapeHtml(item.value)}}</span></div>`)
+        .join("");
+    detail.innerHTML = `
+        <h3>${{escapeHtml(mentor.name)}}</h3>
+        <div class="mentor-detail-school">${{escapeHtml(mentor.school)}}</div>
+        ${{rows}}
+        <a class="mentor-home-button" href="${{escapeHtml(mentor.url)}}" target="_blank" rel="noopener noreferrer">主页</a>
+    `;
+}}
+
+cards.addEventListener("click", event => {{
+    const card = event.target.closest(".mentor-card");
+    if (!card) return;
+    selectedIndex = Number(card.dataset.index);
+    renderCards();
+    renderDetail();
+}});
+
+renderCards();
+renderDetail();
+</script>
+</body>
+</html>
+"""
 
 
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -420,6 +693,13 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
         (col for col in df.columns if "school" in str(col).lower() or "学校" in str(col)),
         None,
     )
+    position_col = find_column(df, ["职位", "position"])
+    research_col = find_column(df, ["研究方向", "research"])
+    match_col = find_column(df, ["Bioinformatics", "匹配"])
+    phd_col = find_column(df, ["PhD"])
+    ra_col = find_column(df, ["RA"])
+    funding_col = find_column(df, ["funding"])
+    note_col = find_column(df, ["联系", "备注", "note"])
 
     rows = df[df[url_col].apply(is_url)].copy()
     if rows.empty:
@@ -427,16 +707,32 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
 
     st.divider()
     st.subheader("导师主页快捷入口")
-    st.caption(f"按当前 Excel 表格推荐顺序显示全部 {len(rows)} 位导师。")
+    st.caption(f"点击导师名片会在本页显示重要信息；需要离开时再点信息卡里的“主页”。按当前 Excel 表格推荐顺序显示全部 {len(rows)} 位导师。")
 
-    cards: list[str] = ['<div class="mentor-card-grid">']
+    mentors: list[dict[str, Any]] = []
     for _, row in rows.iterrows():
         name = str(row.get(name_col, "导师")).strip()
         school = str(row.get(school_col, "")).strip() if school_col else ""
-        url = normalize_url(row[url_col])
-        cards.append(mentor_card_html(name, school, url))
-    cards.append("</div>")
-    st.markdown("".join(cards), unsafe_allow_html=True)
+        mentors.append(
+            {
+                "name": name,
+                "school": school,
+                "url": normalize_url(row[url_col]),
+                "logo": school_logo_url(school),
+                "initials": school_initials(school),
+                "facts": [
+                    {"label": "职位/职称", "value": value_text(row, position_col)},
+                    {"label": "研究方向", "value": value_text(row, research_col)},
+                    {"label": "Bioinformatics 匹配", "value": value_text(row, match_col)},
+                    {"label": "PhD 机会", "value": value_text(row, phd_col)},
+                    {"label": "RA 机会", "value": value_text(row, ra_col)},
+                    {"label": "Funding / 经费", "value": value_text(row, funding_col)},
+                    {"label": "联系建议", "value": value_text(row, note_col)},
+                ],
+            }
+        )
+
+    components.html(mentor_explorer_html(mentors), height=900, scrolling=True)
 
 
 def show_excel(path: Path) -> None:
