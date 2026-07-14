@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import re
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,14 @@ BASE_DIR = Path(__file__).resolve().parent
 SUPPORTED_EXCEL = {".xlsx", ".xls", ".xlsm", ".csv"}
 SUPPORTED_WORD = {".docx"}
 URL_RE = re.compile(r"https?://[^\s<>\]\)\"']+", re.IGNORECASE)
+SCHOOL_DOMAINS = {
+    "University of Waikato": "waikato.ac.nz",
+    "University of Otago": "otago.ac.nz",
+    "University of Canterbury": "canterbury.ac.nz",
+    "University of Auckland": "auckland.ac.nz",
+    "Massey University": "massey.ac.nz",
+    "Victoria University of Wellington": "wgtn.ac.nz",
+}
 
 
 st.set_page_config(
@@ -83,6 +92,60 @@ st.markdown(
         box-shadow: inset 0 0 0 1px #d92d20;
         background: #fff7f6;
         color: #d92d20;
+    }
+    .mentor-card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 14px;
+        margin-top: 12px;
+    }
+    .mentor-card {
+        aspect-ratio: 1 / 1;
+        border: 1px solid rgba(49, 51, 63, 0.16);
+        border-radius: 8px;
+        background: #ffffff;
+        color: #31333f;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        padding: 12px;
+        text-align: center;
+        text-decoration: none;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+        transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+    }
+    .mentor-card:hover {
+        border-color: #d92d20;
+        color: #b42318;
+        text-decoration: none;
+        transform: translateY(-1px);
+        box-shadow: 0 8px 18px rgba(16, 24, 40, 0.10);
+    }
+    .mentor-logo-wrap {
+        width: 58px;
+        height: 58px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: #f3f4f6;
+        overflow: hidden;
+    }
+    .mentor-logo {
+        width: 44px;
+        height: 44px;
+        object-fit: contain;
+    }
+    .mentor-name {
+        font-size: 0.94rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .mentor-school {
+        font-size: 0.72rem;
+        line-height: 1.15;
+        color: #667085;
     }
     </style>
     """,
@@ -190,6 +253,38 @@ def normalize_url(value: Any) -> str:
     if "." in text and " " not in text:
         return f"https://{text}"
     return text
+
+
+def school_logo_url(school: str) -> str:
+    domain = SCHOOL_DOMAINS.get(school.strip())
+    if not domain:
+        return ""
+    return f"https://www.google.com/s2/favicons?sz=128&domain={domain}"
+
+
+def school_initials(school: str) -> str:
+    words = [word for word in re.split(r"\W+", school) if word and word.lower() not in {"of", "the"}]
+    return "".join(word[0].upper() for word in words[:2]) or "NZ"
+
+
+def mentor_card_html(name: str, school: str, url: str) -> str:
+    safe_name = escape(name)
+    safe_school = escape(school)
+    safe_url = escape(url, quote=True)
+    logo_url = school_logo_url(school)
+    logo_html = (
+        f'<img class="mentor-logo" src="{escape(logo_url, quote=True)}" alt="{safe_school} logo" '
+        f'onerror="this.replaceWith(document.createTextNode(\'{escape(school_initials(school))}\'));">'
+        if logo_url
+        else escape(school_initials(school))
+    )
+    return (
+        f'<a class="mentor-card" href="{safe_url}" target="_blank" rel="noopener noreferrer">'
+        f'<div class="mentor-logo-wrap">{logo_html}</div>'
+        f'<div class="mentor-name">{safe_name}</div>'
+        f'<div class="mentor-school">{safe_school}</div>'
+        "</a>"
+    )
 
 
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -334,17 +429,14 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
     st.subheader("导师主页快捷入口")
     st.caption(f"按当前 Excel 表格推荐顺序显示全部 {len(rows)} 位导师。")
 
-    for start in range(0, len(rows), 3):
-        cols = st.columns(3)
-        for col, (_, row) in zip(cols, rows.iloc[start : start + 3].iterrows()):
-            name = str(row.get(name_col, "导师")).strip()
-            school = str(row.get(school_col, "")).strip() if school_col else ""
-            url = normalize_url(row[url_col])
-            label = name
-            if school and school.lower() != "nan":
-                label = f"{name} · {school}"
-            with col:
-                st.link_button(label, url, use_container_width=True)
+    cards: list[str] = ['<div class="mentor-card-grid">']
+    for _, row in rows.iterrows():
+        name = str(row.get(name_col, "导师")).strip()
+        school = str(row.get(school_col, "")).strip() if school_col else ""
+        url = normalize_url(row[url_col])
+        cards.append(mentor_card_html(name, school, url))
+    cards.append("</div>")
+    st.markdown("".join(cards), unsafe_allow_html=True)
 
 
 def show_excel(path: Path) -> None:
