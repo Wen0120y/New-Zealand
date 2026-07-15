@@ -68,28 +68,28 @@ st.markdown(
     [data-testid="stSidebar"] .file-marker {
         display: none;
     }
-    [data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div:has(.excel-file-marker) + div .stButton > button::before {
+    [data-testid="stSidebar"] div[data-testid="stElementContainer"]:has(div[data-testid="stMarkdownContainer"] .excel-file-marker) + div[data-testid="stElementContainer"] .stButton > button::before {
         content: "🟩";
         display: block;
         font-size: 1.9rem;
         line-height: 1;
         margin-bottom: 12px;
     }
-    [data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div:has(.word-file-marker) + div .stButton > button::before {
+    [data-testid="stSidebar"] div[data-testid="stElementContainer"]:has(div[data-testid="stMarkdownContainer"] .word-file-marker) + div[data-testid="stElementContainer"] .stButton > button::before {
         content: "🟦";
         display: block;
         font-size: 1.9rem;
         line-height: 1;
         margin-bottom: 12px;
     }
-    [data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div:has(.generic-file-marker) + div .stButton > button::before {
+    [data-testid="stSidebar"] div[data-testid="stElementContainer"]:has(div[data-testid="stMarkdownContainer"] .generic-file-marker) + div[data-testid="stElementContainer"] .stButton > button::before {
         content: "⬜";
         display: block;
         font-size: 1.9rem;
         line-height: 1;
         margin-bottom: 12px;
     }
-    [data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div:has(.selected-file) + div .stButton > button {
+    [data-testid="stSidebar"] div[data-testid="stElementContainer"]:has(div[data-testid="stMarkdownContainer"] .selected-file) + div[data-testid="stElementContainer"] .stButton > button {
         border-color: #d92d20;
         box-shadow: inset 0 0 0 1px #d92d20;
         background: #fff7f6;
@@ -297,7 +297,6 @@ def render_file_browser(files: list[Path]) -> Path:
                     st.markdown(f'<span class="{marker_classes}"></span>', unsafe_allow_html=True)
                     if st.button(file.name, key=f"file_{file.name}", type="secondary"):
                         st.session_state.selected_file_name = file.name
-                        st.rerun()
 
     return next(file for file in files if file.name == st.session_state.selected_file_name)
 
@@ -382,6 +381,33 @@ body {{
     grid-template-columns: minmax(0, 0.62fr) minmax(280px, 0.38fr);
     gap: 24px;
     align-items: start;
+}}
+.school-tabs {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 14px;
+}}
+.school-tab {{
+    border: 1px solid rgba(49, 51, 63, 0.16);
+    border-radius: 8px;
+    background: #fff;
+    color: #344054;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 8px 10px;
+}}
+.school-tab:hover,
+.school-tab.active {{
+    border-color: #d92d20;
+    color: #b42318;
+    background: #fff7f6;
+}}
+.school-summary {{
+    margin: 0 0 12px;
+    color: #667085;
+    font-size: 0.86rem;
 }}
 .mentor-card-grid {{
     display: grid;
@@ -502,14 +528,20 @@ body {{
 </style>
 </head>
 <body>
+<nav id="schoolTabs" class="school-tabs" aria-label="学校分页"></nav>
+<p id="schoolSummary" class="school-summary"></p>
 <div class="mentor-layout">
     <div id="cards" class="mentor-card-grid"></div>
     <aside id="detail" class="mentor-detail-panel"></aside>
 </div>
 <script>
 const mentors = {payload};
+const schools = [...new Set(mentors.map(mentor => mentor.school || "未标注学校"))];
+const schoolTabs = document.getElementById("schoolTabs");
+const schoolSummary = document.getElementById("schoolSummary");
 const cards = document.getElementById("cards");
 const detail = document.getElementById("detail");
+let selectedSchool = schools[0] || "";
 let selectedIndex = 0;
 
 function escapeHtml(value) {{
@@ -519,8 +551,12 @@ function escapeHtml(value) {{
 }}
 
 function renderCards() {{
-    cards.innerHTML = mentors.map((mentor, index) => `
-        <button class="mentor-card ${{index === selectedIndex ? "selected" : ""}}" type="button" data-index="${{index}}">
+    const visibleMentors = mentors
+        .map((mentor, index) => ({{...mentor, index}}))
+        .filter(mentor => (mentor.school || "未标注学校") === selectedSchool);
+    schoolSummary.textContent = `${{selectedSchool}} · ${{visibleMentors.length}} 位导师 · 按学校内投递优先度排序`;
+    cards.innerHTML = visibleMentors.map((mentor) => `
+        <button class="mentor-card ${{mentor.index === selectedIndex ? "selected" : ""}}" type="button" data-index="${{mentor.index}}">
             <span class="mentor-logo-wrap">
                 ${{mentor.logo ? `<img class="mentor-logo" src="${{escapeHtml(mentor.logo)}}" alt="${{escapeHtml(mentor.school)}} logo" onerror="this.replaceWith(document.createTextNode('${{escapeHtml(mentor.initials)}}'));">` : escapeHtml(mentor.initials)}}
             </span>
@@ -532,6 +568,10 @@ function renderCards() {{
 
 function renderDetail() {{
     const mentor = mentors[selectedIndex];
+    if (!mentor) {{
+        detail.innerHTML = "";
+        return;
+    }}
     const rows = mentor.facts
         .filter(item => item.value)
         .map(item => `<div class="mentor-detail-row"><strong>${{escapeHtml(item.label)}}</strong><span>${{escapeHtml(item.value)}}</span></div>`)
@@ -544,6 +584,14 @@ function renderDetail() {{
     `;
 }}
 
+function renderSchoolTabs() {{
+    schoolTabs.innerHTML = schools.map(school => `
+        <button class="school-tab ${{school === selectedSchool ? "active" : ""}}" type="button" data-school="${{escapeHtml(school)}}">
+            ${{escapeHtml(school)}} <span>${{mentors.filter(mentor => (mentor.school || "未标注学校") === school).length}}</span>
+        </button>
+    `).join("");
+}}
+
 cards.addEventListener("click", event => {{
     const card = event.target.closest(".mentor-card");
     if (!card) return;
@@ -552,6 +600,26 @@ cards.addEventListener("click", event => {{
     renderDetail();
 }});
 
+schoolTabs.addEventListener("click", event => {{
+    const tab = event.target.closest(".school-tab");
+    if (!tab) return;
+    selectedSchool = tab.dataset.school;
+    const firstMentorIndex = mentors.findIndex(mentor => (mentor.school || "未标注学校") === selectedSchool);
+    selectedIndex = Math.max(firstMentorIndex, 0);
+    renderSchoolTabs();
+    renderCards();
+    renderDetail();
+}});
+
+mentors.sort((left, right) => {{
+    const schoolOrder = schools.indexOf(left.school || "未标注学校") - schools.indexOf(right.school || "未标注学校");
+    if (schoolOrder !== 0) return schoolOrder;
+    return Number(left.schoolRank || 9999) - Number(right.schoolRank || 9999);
+}});
+selectedSchool = schools[0] || "";
+selectedIndex = mentors.findIndex(mentor => (mentor.school || "未标注学校") === selectedSchool);
+if (selectedIndex < 0) selectedIndex = 0;
+renderSchoolTabs();
 renderCards();
 renderDetail();
 </script>
@@ -700,6 +768,9 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
     ra_col = find_column(df, ["RA"])
     funding_col = find_column(df, ["funding"])
     note_col = find_column(df, ["联系", "备注", "note"])
+    school_rank_col = find_column(df, ["学校内投递排名", "校内", "投递排名"])
+    school_priority_col = find_column(df, ["学校投递优先度", "优先度分"])
+    confirm_col = find_column(df, ["Bioinfo确认", "确认"])
 
     rows = df[df[url_col].apply(is_url)].copy()
     if rows.empty:
@@ -717,10 +788,14 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
             {
                 "name": name,
                 "school": school,
+                "schoolRank": value_text(row, school_rank_col),
                 "url": normalize_url(row[url_col]),
                 "logo": school_logo_url(school),
                 "initials": school_initials(school),
                 "facts": [
+                    {"label": "学校内投递排名", "value": value_text(row, school_rank_col)},
+                    {"label": "学校投递优先度分", "value": value_text(row, school_priority_col)},
+                    {"label": "Bioinfo 确认状态", "value": value_text(row, confirm_col)},
                     {"label": "职位/职称", "value": value_text(row, position_col)},
                     {"label": "研究方向", "value": value_text(row, research_col)},
                     {"label": "Bioinformatics 匹配", "value": value_text(row, match_col)},
