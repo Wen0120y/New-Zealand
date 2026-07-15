@@ -363,6 +363,13 @@ def value_text(row: pd.Series, col: str | None) -> str:
     return str(value).strip()
 
 
+def truthy_marker(value: Any) -> bool:
+    if pd.isna(value):
+        return False
+    text = str(value).strip().lower()
+    return text in {"1", "1.0", "true", "yes", "y", "是", "选中", "选择"}
+
+
 def mentor_explorer_html(mentors: list[dict[str, Any]]) -> str:
     payload = json.dumps(mentors, ensure_ascii=False)
     return f"""
@@ -437,10 +444,21 @@ body {{
     transform: translateY(-1px);
     box-shadow: 0 8px 18px rgba(16, 24, 40, 0.10);
 }}
+.mentor-card.chosen {{
+    border-color: #9ae6b4;
+    background: #ecfdf3;
+}}
+.mentor-card.chosen:hover {{
+    border-color: #d92d20;
+    background: #dcfce7;
+}}
 .mentor-card.selected {{
     border-color: #d92d20;
     box-shadow: inset 0 0 0 1px #d92d20;
     background: #fff7f6;
+}}
+.mentor-card.chosen.selected {{
+    background: #dcfce7;
 }}
 .mentor-logo-wrap {{
     width: 58px;
@@ -556,7 +574,7 @@ function renderCards() {{
         .filter(mentor => (mentor.school || "未标注学校") === selectedSchool);
     schoolSummary.textContent = `${{selectedSchool}} · ${{visibleMentors.length}} 位导师 · 按学校内投递优先度排序`;
     cards.innerHTML = visibleMentors.map((mentor) => `
-        <button class="mentor-card ${{mentor.index === selectedIndex ? "selected" : ""}}" type="button" data-index="${{mentor.index}}">
+        <button class="mentor-card ${{mentor.chosen ? "chosen" : ""}} ${{mentor.index === selectedIndex ? "selected" : ""}}" type="button" data-index="${{mentor.index}}">
             <span class="mentor-logo-wrap">
                 ${{mentor.logo ? `<img class="mentor-logo" src="${{escapeHtml(mentor.logo)}}" alt="${{escapeHtml(mentor.school)}} logo" onerror="this.replaceWith(document.createTextNode('${{escapeHtml(mentor.initials)}}'));">` : escapeHtml(mentor.initials)}}
             </span>
@@ -771,6 +789,7 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
     school_rank_col = find_column(df, ["学校内投递排名", "校内", "投递排名"])
     school_priority_col = find_column(df, ["学校投递优先度", "优先度分"])
     confirm_col = find_column(df, ["Bioinfo确认", "确认"])
+    chosen_col = find_column(df, ["选择", "select", "chosen", "ѡ"])
 
     rows = df[df[url_col].apply(is_url)].copy()
     if rows.empty:
@@ -789,6 +808,7 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
                 "name": name,
                 "school": school,
                 "schoolRank": value_text(row, school_rank_col),
+                "chosen": truthy_marker(row.get(chosen_col, "")) if chosen_col else False,
                 "url": normalize_url(row[url_col]),
                 "logo": school_logo_url(school),
                 "initials": school_initials(school),
