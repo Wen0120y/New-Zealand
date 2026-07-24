@@ -370,6 +370,15 @@ def truthy_marker(value: Any) -> bool:
     return text in {"1", "1.0", "true", "yes", "y", "是", "选中", "选择"}
 
 
+def sortable_number(value: Any, fallback: float = 9999) -> float:
+    if pd.isna(value):
+        return fallback
+    match = re.search(r"-?\d+(?:\.\d+)?", str(value))
+    if not match:
+        return fallback
+    return float(match.group())
+
+
 def mentor_explorer_html(mentors: list[dict[str, Any]]) -> str:
     payload = json.dumps(mentors, ensure_ascii=False)
     return f"""
@@ -568,11 +577,19 @@ function escapeHtml(value) {{
     }}[ch]));
 }}
 
+function sortNumber(value, fallback = 9999) {{
+    const match = String(value ?? "").match(/-?\\d+(\\.\\d+)?/);
+    if (!match) return fallback;
+    const number = Number(match[0]);
+    return Number.isFinite(number) ? number : fallback;
+}}
+
 function renderCards() {{
     const visibleMentors = mentors
         .map((mentor, index) => ({{...mentor, index}}))
         .filter(mentor => (mentor.school || "未标注学校") === selectedSchool);
-    schoolSummary.textContent = `${{selectedSchool}} · ${{visibleMentors.length}} 位导师 · 按学校内投递优先度排序`;
+    const sortedBy = mentors.some(mentor => mentor.batch) ? "按批次排序" : "按学校内投递优先度排序";
+    schoolSummary.textContent = `${{selectedSchool}} · ${{visibleMentors.length}} 位导师 · ${{sortedBy}}`;
     cards.innerHTML = visibleMentors.map((mentor) => `
         <button class="mentor-card ${{mentor.chosen ? "chosen" : ""}} ${{mentor.index === selectedIndex ? "selected" : ""}}" type="button" data-index="${{mentor.index}}">
             <span class="mentor-logo-wrap">
@@ -632,7 +649,9 @@ schoolTabs.addEventListener("click", event => {{
 mentors.sort((left, right) => {{
     const schoolOrder = schools.indexOf(left.school || "未标注学校") - schools.indexOf(right.school || "未标注学校");
     if (schoolOrder !== 0) return schoolOrder;
-    return Number(left.schoolRank || 9999) - Number(right.schoolRank || 9999);
+    const batchOrder = sortNumber(left.batch) - sortNumber(right.batch);
+    if (batchOrder !== 0) return batchOrder;
+    return sortNumber(left.schoolRank) - sortNumber(right.schoolRank);
 }});
 selectedSchool = schools[0] || "";
 selectedIndex = mentors.findIndex(mentor => (mentor.school || "未标注学校") === selectedSchool);
@@ -786,6 +805,7 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
     ra_col = find_column(df, ["RA"])
     funding_col = find_column(df, ["funding"])
     note_col = find_column(df, ["联系", "备注", "note"])
+    batch_col = find_column(df, ["批次", "batch"])
     school_rank_col = find_column(df, ["学校内投递排名", "校内", "投递排名"])
     school_priority_col = find_column(df, ["学校投递优先度", "优先度分"])
     confirm_col = find_column(df, ["Bioinfo确认", "确认"])
@@ -794,10 +814,15 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
     rows = df[df[url_col].apply(is_url)].copy()
     if rows.empty:
         return
+    if batch_col:
+        rows["_mentor_batch_sort"] = rows[batch_col].apply(sortable_number)
+        secondary_sort = [col for col in [school_col, school_rank_col, name_col] if col]
+        rows = rows.sort_values(["_mentor_batch_sort", *secondary_sort], kind="stable")
 
     st.divider()
     st.subheader("导师主页快捷入口")
-    st.caption(f"点击导师名片会在本页显示重要信息；需要离开时再点信息卡里的“主页”。按当前 Excel 表格推荐顺序显示全部 {len(rows)} 位导师。")
+    sort_text = "按“批次”列排序" if batch_col else "按当前 Excel 表格推荐顺序"
+    st.caption(f"点击导师名片会在本页显示重要信息；需要离开时再点信息卡里的“主页”。{sort_text}显示全部 {len(rows)} 位导师。")
 
     mentors: list[dict[str, Any]] = []
     for _, row in rows.iterrows():
@@ -807,12 +832,14 @@ def show_mentor_links(df: pd.DataFrame, file_name: str) -> None:
             {
                 "name": name,
                 "school": school,
+                "batch": value_text(row, batch_col),
                 "schoolRank": value_text(row, school_rank_col),
                 "chosen": truthy_marker(row.get(chosen_col, "")) if chosen_col else False,
                 "url": normalize_url(row[url_col]),
                 "logo": school_logo_url(school),
                 "initials": school_initials(school),
                 "facts": [
+                    {"label": "批次", "value": value_text(row, batch_col)},
                     {"label": "学校内投递排名", "value": value_text(row, school_rank_col)},
                     {"label": "学校投递优先度分", "value": value_text(row, school_priority_col)},
                     {"label": "Bioinfo 确认状态", "value": value_text(row, confirm_col)},
